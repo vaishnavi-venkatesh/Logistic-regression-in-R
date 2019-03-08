@@ -1,0 +1,123 @@
+#QUESTION 3
+
+#Divide the provided Titanic Survival Data into two subsets: a training data set and a test data set. Use whatever strategy you believe it best. Justify your answer.
+
+# load the dataset
+titanic <- read.csv('titanic_data.csv', header = TRUE, na.strings = c(''))
+
+# structure of the dataset
+str(titanic)
+
+# checking for missing values
+summary(titanic)
+
+# age has 177 missing values, cabin 687 and embarked 2
+# since cabin has many missing values that will potentially many different
+# levels, leaving it out from further analysis
+
+# handling missing embarked values
+# filtering the rows with missing embark values
+filter(titanic, is.na(Embarked))
+
+# the two passengeres paid 80 bucks as the ticket fare, so the port of embarkation
+# with a similar ticket price is likely to be the one for both the passengrs given
+# thier passenger class
+embark_fare <- titanic %>% 
+  filter(!is.na(Embarked))
+
+ggplot(embark_fare, aes(Embarked, Fare, fill = factor(Pclass))) +
+  geom_boxplot() +
+  geom_hline(yintercept = 80)
+
+# imputing the missing embark values
+# it is clear that both the passengers most likely boarded from 'C' as the intercept
+# 80 corresponds to Pclass 1 for 'C'
+titanic$Embarked[is.na(titanic$Embarked)] <- 'C'
+
+# handling the missing age values
+age_non_missing <- titanic %>% 
+  filter(!is.na(Age))
+age_missing <- titanic %>% 
+  filter(is.na(Age))
+
+# creating a regression tree model to predict age
+age <- rpart(Age ~ factor(Pclass) + Sex + Fare + Embarked, age_non_missing)
+
+# predicting the age 
+age_predict <- round(predict(age, age_missing))
+
+# imputing the missing age values
+titanic$Age[is.na(titanic$Age)] <- age_predict
+
+# splitting the dataset, 75% for training, 25% for testing
+set.seed(42)
+indxTrain <- createDataPartition(titanic$PassengerId, p = 0.75, list = FALSE)
+titanic_train <- titanic[indxTrain, ]
+titanic_test <- titanic[-indxTrain, ]
+
+# the data was split into 75:25 because this it provides a good amount of data
+# to build a robust model, that can be trained and achieve high accuracy when 
+# predicting the values of unseen data
+
+#Construct a logistic regression model to predict the probability of a passenger surviving the Titanic accident. Test the statistical significance of all parameters and eliminate those that have a p-value > 0.05 using stepwise backward elimination.
+
+# creating a logistic regression model by using the train data, while not considering
+# the PassengerId, Name, Ticket and Cabin as the independent variables
+train_model <- glm(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, 
+                   data = titanic_train, family = binomial)
+
+# summary of the model
+summary(train_model)
+
+# stepwise backward elimination of the model by removing the variables with p > 0.05
+# one by one starting with the highest till only varibales with p < 0.05 are left
+
+# removing Embarked
+train_model_1 <- glm(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare, 
+                    data = titanic_train, family = binomial)
+summary(train_model_1)
+
+# removing Parch
+train_model_2 <- glm(Survived ~ Pclass + Sex + Age + SibSp + Fare, 
+                     data = titanic_train, family = binomial)
+summary(train_model_2)
+
+# removing Fare
+train_model_3 <- glm(Survived ~ Pclass + Sex + Age + SibSp, 
+                     data = titanic_train, family = binomial)
+summary(train_model_3)
+
+# only features with p < 0.05 are left, these are Pclass, Sex, Age, Sibsp
+
+# stepwise backward elimination of the features from the initial model using 
+# AIC as the determining criteria
+train_model_aic <- step(train_model, direction = 'backward')
+
+summary(train_model_aic)
+
+# comparing the models obtained by manual backward elimination and aic 
+# by ANOVA to determine which one is better
+
+anova(train_model_3, train_model_aic, test = 'Chisq')
+
+# since p = 0.1254 > 0.05, we can say that models are not statistically different
+
+# the regression equation that will be used for prediction
+# Survived ~ 5.083540 + Pclass*(-1.106883) + Sex*(-2.600504) + Age*(-0.045784) + 
+#            SibSp*(-0.373759) + Fare*(-0.003807)
+
+# the regression equation that will be used for prediction
+# Survived ~ 5.083540 + Pclass*(-1.106883) + Sex*(-2.600504) + Age*(-0.045784) + 
+#            SibSp*(-0.373759) + Fare*(-0.003807)
+
+# predicting the survival for the passengers in test data
+pred <- predict(train_model_aic, titanic_test, type = 'response')
+
+# passengers with probability > 0.6 are determined as surviving
+pred_class <- ifelse(pred > 0.60, 1, 0)
+
+# crosstable and confusion matrix for survival prediction accuracy
+confusionMatrix(pred_class, titanic_test$Survived)
+
+CrossTable(pred_class, titanic_test$Survived, prop.chisq = FALSE, prop.c = FALSE, 
+           prop.r = FALSE, dnn = c('predicted', 'actual'))
